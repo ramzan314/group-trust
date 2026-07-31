@@ -1,0 +1,22 @@
+# Dependency directories
+node_modules/
+jspdf/
+
+# Backend builds and databases
+backend/dist/
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+backend/.env
+
+# Frontend builds
+frontend/.next/
+frontend/out/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System files
+.DS_Store
+Thumbs.db

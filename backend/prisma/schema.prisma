@@ -1,0 +1,214 @@
+datasource db {
+  provider = "sqlite" // Easily changed to "postgresql" for production
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String         @id @default(uuid())
+  name            String
+  email           String         @unique
+  phone           String         @unique
+  passwordHash    String
+  role            String         // NGO_ADMIN, SECRETARY, MEMBER
+  isVerified      Boolean        @default(false)
+  kycStatus       String         @default("PENDING") // PENDING, APPROVED, REJECTED
+  kycDocumentUrl  String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  
+  // Relations
+  ngosManaged     Ngo[]          @relation("NgoAdmin")
+  groupsManaged   Group[]        @relation("GroupSecretary")
+  groupMemberships GroupMember[]
+  transactions    Transaction[]  @relation("MemberTransactions")
+  recordedTx      Transaction[]  @relation("RecordedTransactions")
+  loans           Loan[]         @relation("BorrowerLoans")
+  votedLoans      LoanVote[]
+  roscaWinners    RoscaRound[]
+  complaints      Complaint[]
+  auditLogs       AuditLog[]
+}
+
+model Ngo {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  address     String?
+  adminId     String
+  admin       User     @relation("NgoAdmin", fields: [adminId], references: [id])
+  groups      Group[]
+  createdAt   DateTime @default(now())
+}
+
+model Group {
+  id              String         @id @default(uuid())
+  name            String
+  type            String         // ROSCA, JLG, SHG
+  ngoId           String?
+  ngo             Ngo?           @relation(fields: [ngoId], references: [id])
+  secretaryId     String
+  secretary       User           @relation("GroupSecretary", fields: [secretaryId], references: [id])
+  savingsAmount   Float          // Required contribution per frequency
+  savingsFrequency String        // WEEKLY, MONTHLY
+  interestRate    Float          // Annualized interest rate (e.g. 12.0)
+  createdAt       DateTime       @default(now())
+
+  // Relations
+  members         GroupMember[]
+  meetings        Meeting[]
+  transactions    Transaction[]
+  loans           Loan[]
+  roscaCycles     RoscaCycle[]
+}
+
+model GroupMember {
+  id        String   @id @default(uuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id])
+  memberId  String
+  member    User     @relation(fields: [memberId], references: [id])
+  status    String   @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
+  joinedAt  DateTime @default(now())
+
+  @@unique([groupId, memberId])
+}
+
+model Meeting {
+  id          String       @id @default(uuid())
+  groupId     String
+  group       Group        @relation(fields: [groupId], references: [id])
+  title       String
+  date        DateTime
+  location    String?
+  gpsLat      Float?
+  gpsLng      Float?
+  minutes     String?
+  createdAt   DateTime     @default(now())
+  
+  attendance  Attendance[]
+}
+
+model Attendance {
+  id        String   @id @default(uuid())
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id])
+  memberId  String
+  status    String   // PRESENT, ABSENT, EXCUSED
+}
+
+model Transaction {
+  id             String   @id @default(uuid())
+  groupId        String
+  group          Group    @relation(fields: [groupId], references: [id])
+  memberId       String
+  member         User     @relation("MemberTransactions", fields: [memberId], references: [id])
+  type           String   // SAVINGS, LOAN_DISBURSEMENT, LOAN_REPAYMENT, FINE, ROSCA_CONTRIBUTION, ROSCA_PAYOUT
+  amount         Float
+  recorderId     String
+  recorder       User     @relation("RecordedTransactions", fields: [recorderId], references: [id])
+  approvalStatus String   @default("APPROVED") // APPROVED, PENDING, REJECTED
+  paymentMethod  String   // CASH, UPI, BANK_TRANSFER
+  remarks        String?
+  receiptNumber  String   @unique
+  transactionHash String  // Audit checksum (SHA256 of transaction contents + previous hash)
+  isReversed     Boolean  @default(false)
+  reversedById   String?
+  createdAt      DateTime @default(now())
+}
+
+model Loan {
+  id             String       @id @default(uuid())
+  groupId        String
+  group          Group        @relation(fields: [groupId], references: [id])
+  borrowerId     String
+  borrower       User         @relation("BorrowerLoans", fields: [borrowerId], references: [id])
+  principal      Float
+  interestRate   Float
+  durationMonths Int
+  emiAmount      Float
+  status         String       @default("PENDING_APPROVAL") // PENDING_APPROVAL, ACTIVE, REPAID, DEFAULTED
+  purpose        String
+  approvedById   String?
+  createdAt      DateTime     @default(now())
+
+  guarantors     LoanGuarantor[]
+  votes          LoanVote[]
+  repayments     LoanRepayment[]
+}
+
+model LoanGuarantor {
+  id          String  @id @default(uuid())
+  loanId      String
+  loan        Loan    @relation(fields: [loanId], references: [id])
+  guarantorId String
+  status      String  @default("ACTIVE") // ACTIVE, DEFAULT_ALERT
+}
+
+model LoanVote {
+  id       String @id @default(uuid())
+  loanId   String
+  loan     Loan   @relation(fields: [loanId], references: [id])
+  memberId String
+  user     User   @relation(fields: [memberId], references: [id])
+  vote     String // APPROVE, REJECT
+}
+
+model LoanRepayment {
+  id            String   @id @default(uuid())
+  loanId        String
+  loan          Loan     @relation(fields: [loanId], references: [id])
+  amount        Float
+  principalPaid Float
+  interestPaid  Float
+  date          DateTime @default(now())
+}
+
+model RoscaCycle {
+  id                 String       @id @default(uuid())
+  groupId            String
+  group              Group        @relation(fields: [groupId], references: [id])
+  contributionAmount Float
+  cycleDurationDays  Int
+  currentRound       Int          @default(1)
+  status             String       @default("ACTIVE") // ACTIVE, COMPLETED
+  createdAt          DateTime     @default(now())
+  
+  rounds             RoscaRound[]
+}
+
+model RoscaRound {
+  id           String     @id @default(uuid())
+  roscaCycleId String
+  roscaCycle   RoscaCycle @relation(fields: [roscaCycleId], references: [id])
+  roundNumber  Int
+  recipientId  String
+  recipient    User       @relation(fields: [recipientId], references: [id])
+  drawMethod   String     // LOTTERY, MANUAL
+  payoutAmount Float
+  payoutStatus String     @default("PENDING") // PENDING, PAID
+  drawDate     DateTime   @default(now())
+}
+
+model Complaint {
+  id          String   @id @default(uuid())
+  memberId    String
+  member      User     @relation(fields: [memberId], references: [id])
+  title       String
+  description String
+  status      String   @default("OPEN") // OPEN, RESOLVED
+  response    String?
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  details   String
+  timestamp DateTime @default(now())
+}
