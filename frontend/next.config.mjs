@@ -6,7 +6,7 @@ const nextConfig = {
         source: '/api/:path*',
         destination: process.env.INTERNAL_API_URL 
           ? `${process.env.INTERNAL_API_URL}/:path*`
-          : 'http://localhost:5001/api/:path*',
+          : 'http://127.0.0.1:5001/api/:path*',
       },
     ];
   },
