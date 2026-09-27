@@ -1,24 +1,13 @@
 function getBaseUrl(): string {
-  // If explicitly set at build or runtime
+  // If explicitly overridden via environment variable
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL;
   }
 
-  // Client-side dynamic origin detection
+  // In the browser, use relative path '/api'.
+  // Next.js rewrites proxy this directly to the backend on localhost:5001,
+  // completely eliminating the need to open port 5001 in cloud firewalls or configure CORS.
   if (typeof window !== 'undefined') {
-    const { hostname, port, protocol } = window.location;
-
-    // Local machine development
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://localhost:5001/api';
-    }
-
-    // Direct port 3000 access on VPS without Nginx proxy (e.g. http://123.45.67.89:3000)
-    if (port === '3000') {
-      return `${protocol}//${hostname}:5001/api`;
-    }
-
-    // Standard port 80 / 443 / domain access through Nginx reverse proxy
     return '/api';
   }
 
@@ -57,10 +46,10 @@ export async function fetchAPI(path: string, options: RequestInit = {}) {
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      throw new Error(`Request timed out reaching backend API (${baseUrl}). Please check if port 5001 is open or if Nginx is running.`);
+      throw new Error(`Request timed out reaching API (${baseUrl}). Please check if backend is running.`);
     }
     if (error.message && error.message.includes('Failed to fetch')) {
-      throw new Error(`Could not connect to API server at ${baseUrl}. Ensure backend is running and not blocked by firewall.`);
+      throw new Error(`Could not connect to API server at ${baseUrl}. Ensure backend service is running.`);
     }
     throw error;
   }
