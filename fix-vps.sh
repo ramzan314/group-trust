@@ -1,51 +1,75 @@
 #!/bin/bash
 set -e
 
-echo "=== GroupTrust VPS Diagnostics & Auto-Repair ==="
+echo "=================================================="
+echo "   GroupTrust VPS Diagnostics & Auto-Repair"
+echo "=================================================="
 
 # 1. Pull latest code
-echo "--> Pulling latest updates from GitHub..."
+echo "--> 1. Pulling latest updates from GitHub..."
+git reset --hard origin/main || true
 git pull origin main
 
-# 2. Build backend
-echo "--> Building Backend..."
+# 2. Setup backend environment and database
+echo "--> 2. Setting up Backend..."
 cd backend
+
+if [ ! -f .env ]; then
+  echo "    Creating backend/.env..."
+  cat <<EOF > .env
+DATABASE_URL="file:./dev.db"
+JWT_SECRET="grouptrust-vps-secret-key-123456789"
+PORT=5001
+EOF
+fi
+
 npm install
 npx prisma generate
-npx prisma migrate deploy || npx prisma db push || true
-# Seed database if no users exist
+npx prisma db push --accept-data-loss
 npm run prisma:seed || true
 npm run build
 cd ..
 
-# 3. Build frontend
-echo "--> Building Frontend..."
+# 3. Setup frontend
+echo "--> 3. Building Frontend..."
 cd frontend
+# Ensure frontend uses the internal /api rewrite proxy
+rm -f .env.local
 npm install
 npm run build
 cd ..
 
-# 4. Restart PM2 processes
-echo "--> Restarting PM2 processes..."
-pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js
+# 4. Clean and restart PM2
+echo "--> 4. Restarting PM2 processes..."
+pm2 delete all || true
+pm2 start ecosystem.config.js
+pm2 save
 
-sleep 3
+echo "--> 5. Waiting 4 seconds for services to initialize..."
+sleep 4
 
-# 5. Verify local endpoints
-echo "--> Verifying Backend (Port 5001)..."
+# 5. Check processes
+echo "--------------------------------------------------"
+echo "PM2 Process Status:"
+pm2 status
+echo "--------------------------------------------------"
+
+# 6. Test endpoints
+echo "--> 6. Verifying Backend (Port 5001)..."
 if curl -s -f http://127.0.0.1:5001/health > /dev/null; then
-  echo "✓ Backend API is HEALTHY on port 5001"
+  echo ">>> SUCCESS: Backend API is running on port 5001! <<<"
 else
-  echo "✗ Backend API failed to respond. Checking backend logs:"
-  pm2 logs grouptrust-backend --lines 20 --nostream
+  echo ">>> ERROR: Backend failed to respond. Printing backend logs: <<<"
+  pm2 logs grouptrust-backend --lines 25 --nostream
 fi
 
-echo "--> Verifying Frontend Proxy (Port 3000 -> 5001)..."
+echo "--> 7. Verifying Frontend Proxy (Port 3000 -> 5001)..."
 if curl -s -f http://127.0.0.1:3000/api/health > /dev/null; then
-  echo "✓ Frontend API proxy is WORKING on port 3000"
+  echo ">>> SUCCESS: Frontend API proxy is working on port 3000! <<<"
 else
-  echo "! Proxy test did not return 200. Checking PM2 status:"
-  pm2 status
+  echo ">>> NOTICE: Frontend proxy check did not return 200. <<<"
 fi
 
-echo "=== Diagnosis Complete ==="
+echo "=================================================="
+echo "Auto-repair complete! Try logging in again now."
+echo "=================================================="

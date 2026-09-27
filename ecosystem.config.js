@@ -12,6 +12,8 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 5001,
+        DATABASE_URL: 'file:./dev.db',
+        JWT_SECRET: 'grouptrust-production-secret-key-987654321',
       },
     },
     {
