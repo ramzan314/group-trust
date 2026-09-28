@@ -106,40 +106,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    const storedLang = localStorage.getItem('lang') as 'en' | 'hi';
-    const storedVoice = localStorage.getItem('voice') === 'true';
-    const storedTheme = (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
+    try {
+      const storedToken = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      const storedLang = localStorage.getItem('lang') as 'en' | 'hi';
+      const storedVoice = localStorage.getItem('voice') === 'true';
+      const storedTheme = (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
 
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+      if (storedToken && storedUser && storedUser !== 'undefined' && storedUser !== 'null') {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setToken(storedToken);
+          setUser(parsedUser);
+        } catch (e) {
+          console.warn('Invalid user JSON in localStorage, clearing auth tokens');
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }
+      if (storedLang) setLanguageState(storedLang);
+      setVoiceEnabledState(storedVoice);
+      setTheme(storedTheme);
+    } catch (err) {
+      console.warn('Error reading from localStorage:', err);
+    } finally {
+      setLoading(false);
     }
-    if (storedLang) setLanguageState(storedLang);
-    setVoiceEnabledState(storedVoice);
-    setTheme(storedTheme);
-    setLoading(false);
   }, []);
 
   useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
+    try {
+      const root = window.document.documentElement;
+      if (theme === 'dark') {
+        root.classList.add('dark');
+      } else {
+        root.classList.remove('dark');
+      }
+      localStorage.setItem('theme', theme);
+    } catch (e) {
+      // Ignore localStorage errors in restricted environments
     }
-    localStorage.setItem('theme', theme);
   }, [theme]);
 
   const setLanguage = (lang: 'en' | 'hi') => {
     setLanguageState(lang);
-    localStorage.setItem('lang', lang);
+    try {
+      localStorage.setItem('lang', lang);
+    } catch (e) {}
   };
 
   const setVoiceEnabled = (enabled: boolean) => {
     setVoiceEnabledState(enabled);
-    localStorage.setItem('voice', String(enabled));
+    try {
+      localStorage.setItem('voice', String(enabled));
+    } catch (e) {}
   };
 
   const speak = (text: string) => {
@@ -153,8 +173,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginUser = (newToken: string, userData: any) => {
     setToken(newToken);
     setUser(userData);
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(userData));
+    try {
+      localStorage.setItem('token', newToken);
+      localStorage.setItem('user', JSON.stringify(userData));
+    } catch (e) {}
     
     if (userData.role === 'NGO_ADMIN') {
       router.push('/dashboard/ngo');
@@ -168,8 +190,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logoutUser = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    } catch (e) {}
     router.push('/');
   };
 
@@ -188,30 +212,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logoutUser,
       }}
     >
-      {loading ? (
-        <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-brand-500 border-t-transparent"></div>
-        </div>
-      ) : (
-        <div className="relative">
-          <button
-            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            className="fixed bottom-4 right-4 z-50 rounded-full bg-white p-3 shadow-lg hover:bg-slate-100 transition dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-yellow-400"
-            aria-label="Toggle Theme"
-          >
-            {theme === 'light' ? (
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-              </svg>
-            )}
-          </button>
-          {children}
-        </div>
-      )}
+      <div className="relative">
+        <button
+          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          className="fixed bottom-4 right-4 z-50 rounded-full bg-white p-3 shadow-lg hover:bg-slate-100 transition dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-yellow-400"
+          aria-label="Toggle Theme"
+        >
+          {theme === 'light' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+            </svg>
+          )}
+        </button>
+        {children}
+      </div>
     </AuthContext.Provider>
   );
 }

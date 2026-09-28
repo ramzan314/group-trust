@@ -12,17 +12,23 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, token, logoutUser, language } = useAuth();
+  const { user, token, loading, logoutUser, language } = useAuth();
   const router = useRouter();
   const t = translations[language];
 
   useEffect(() => {
-    if (!token || !user) {
+    if (!loading && (!token || !user)) {
       router.push('/login');
     }
-  }, [token, user]);
+  }, [loading, token, user, router]);
 
-  if (!user) return null;
+  if (loading || !user) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-brand-500 border-t-transparent"></div>
+      </div>
+    );
+  }
 
   const getRoleBadge = (role: string) => {
     switch (role) {
@@ -36,8 +42,9 @@ export default function DashboardLayout({
   };
 
   const getSpeechWelcomeText = () => {
+    const userName = user?.name || 'User';
     if (language === 'hi') {
-      return `डैशबोर्ड में आपका स्वागत है, ${user.name}। आपकी भूमिका ${
+      return `डैशबोर्ड में आपका स्वागत है, ${userName}। आपकी भूमिका ${
         user.role === 'NGO_ADMIN'
           ? 'एनजीओ व्यवस्थापक'
           : user.role === 'SECRETARY'

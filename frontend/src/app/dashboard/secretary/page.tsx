@@ -368,9 +368,17 @@ export default function SecretaryDashboard() {
         </div>
       </div>
 
-      {loading || !selectedGroup ? (
+      {loading ? (
         <div className="flex justify-center py-20">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-500 border-t-transparent"></div>
+        </div>
+      ) : !selectedGroup ? (
+        <div className="p-8 rounded-3xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-center flex flex-col items-center gap-3">
+          <Landmark className="h-10 w-10 text-amber-600 dark:text-amber-400" />
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">No Assigned Group Found</h2>
+          <p className="text-sm text-slate-500 max-w-md">
+            You do not currently have any active group assigned to your secretary account. Please ask your NGO Administrator to assign you to a SHG, JLG, or ROSCA group.
+          </p>
         </div>
       ) : (
         <>
