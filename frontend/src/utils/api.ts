@@ -4,10 +4,18 @@ function getBaseUrl(): string {
     return process.env.NEXT_PUBLIC_API_URL;
   }
 
-  // In the browser, use relative path '/api'.
-  // Next.js rewrites proxy this directly to the backend on localhost:5001,
-  // completely eliminating the need to open port 5001 in cloud firewalls or configure CORS.
+  // Client-side detection
   if (typeof window !== 'undefined') {
+    const { hostname } = window.location;
+    
+    // In local development, connect directly to the Express backend port 5001
+    // to bypass any local sandbox socket restrictions
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:5001/api';
+    }
+
+    // In production (VPS / domain / public IP), use relative '/api'
+    // which routes via Nginx or Next.js server rewrite
     return '/api';
   }
 
