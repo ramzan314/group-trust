@@ -181,6 +181,55 @@ router.get('/secretaries', authenticateJWT, async (req: Request, res: Response) 
   }
 });
 
+// Member joins a group using Group ID
+router.post('/join', authenticateJWT, async (req: Request, res: Response) => {
+  const authReq = req as AuthenticatedRequest;
+  const userId = authReq.user!.id;
+  const { groupId } = req.body;
+
+  if (!groupId) {
+    return res.status(400).json({ error: 'Group ID is required to join' });
+  }
+
+  try {
+    const cleanId = String(groupId).trim();
+    const group = await prisma.group.findUnique({
+      where: { id: cleanId },
+      include: { secretary: { select: { name: true, phone: true } } },
+    });
+
+    if (!group) {
+      return res.status(404).json({ error: 'No group found with this Group ID. Please check with your Secretary.' });
+    }
+
+    const existing = await prisma.groupMember.findUnique({
+      where: {
+        groupId_memberId: { groupId: group.id, memberId: userId },
+      },
+    });
+
+    if (existing) {
+      return res.status(400).json({ error: `You are already a member of "${group.name}".` });
+    }
+
+    const membership = await prisma.groupMember.create({
+      data: {
+        groupId: group.id,
+        memberId: userId,
+        status: 'ACTIVE',
+      },
+      include: {
+        group: true,
+      },
+    });
+
+    await logSystemActivity(userId, 'MEMBER_JOIN_GROUP', `Member joined group ${group.name} (${group.id})`);
+    return res.status(201).json({ message: `Successfully joined ${group.name}!`, membership, group });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Failed to join group' });
+  }
+});
+
 // Get Group Detail
 router.get('/:id', authenticateJWT, async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -192,8 +241,9 @@ router.get('/:id', authenticateJWT, async (req: Request, res: Response) => {
         ngo: true,
         members: {
           include: {
-            member: { select: { id: true, name: true, email: true, phone: true, kycStatus: true } },
+            member: { select: { id: true, name: true, email: true, phone: true, kycStatus: true, createdAt: true } },
           },
+          orderBy: { joinedAt: 'desc' },
         },
       },
     });
@@ -204,40 +254,96 @@ router.get('/:id', authenticateJWT, async (req: Request, res: Response) => {
   }
 });
 
-// Add member to group
+// Add or create member in group (Secretary or NGO Admin)
 router.post('/:id/members', authenticateJWT, requireRole(['NGO_ADMIN', 'SECRETARY']), async (req: Request, res: Response) => {
   const { id: groupId } = req.params;
-  const { memberId } = req.body;
-
-  if (!memberId) return res.status(400).json({ error: 'memberId is required' });
+  const { memberId, email, phone, name, password } = req.body;
 
   try {
-    const user = await prisma.user.findUnique({ where: { id: memberId } });
-    if (!user) return res.status(400).json({ error: 'User does not exist' });
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+
+    let targetUser = null;
+
+    // 1. By memberId
+    if (memberId) {
+      targetUser = await prisma.user.findUnique({ where: { id: memberId } });
+    }
+
+    // 2. By email or phone
+    if (!targetUser && email) {
+      targetUser = await prisma.user.findFirst({ where: { email: String(email).trim().toLowerCase() } });
+    }
+    if (!targetUser && phone) {
+      targetUser = await prisma.user.findFirst({ where: { phone: String(phone).trim() } });
+    }
+
+    // 3. Create brand new member account if not found
+    if (!targetUser && (name || email || phone)) {
+      const memberEmail = email ? String(email).trim().toLowerCase() : `member_${Date.now()}@grouptrust.com`;
+      const memberPhone = phone ? String(phone).trim() : `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+      const passwordHash = await bcrypt.hash(password || 'password123', 10);
+
+      targetUser = await prisma.user.create({
+        data: {
+          name: name || 'Group Member',
+          email: memberEmail,
+          phone: memberPhone,
+          passwordHash,
+          role: 'MEMBER',
+          isVerified: true,
+          kycStatus: 'APPROVED',
+        },
+      });
+    }
+
+    if (!targetUser) {
+      return res.status(400).json({ error: 'Member not found. Please provide valid member details.' });
+    }
 
     const existing = await prisma.groupMember.findUnique({
       where: {
-        groupId_memberId: { groupId, memberId },
+        groupId_memberId: { groupId, memberId: targetUser.id },
       },
     });
 
     if (existing) {
-      return res.status(400).json({ error: 'User is already a member of this group' });
+      return res.status(400).json({ error: `${targetUser.name} is already a member of this group` });
     }
 
     const membership = await prisma.groupMember.create({
       data: {
         groupId,
-        memberId,
+        memberId: targetUser.id,
         status: 'ACTIVE',
+      },
+      include: {
+        member: { select: { id: true, name: true, email: true, phone: true, kycStatus: true, createdAt: true } },
       },
     });
 
     const authReq = req as AuthenticatedRequest;
-    await logSystemActivity(authReq.user!.id, 'GROUP_ADD_MEMBER', `Added user ${memberId} to group ${groupId}`);
+    await logSystemActivity(authReq.user!.id, 'GROUP_ADD_MEMBER', `Added user ${targetUser.name} (${targetUser.id}) to group ${groupId}`);
     return res.status(201).json(membership);
   } catch (error: any) {
-    return res.status(500).json({ error: 'Failed to add member' });
+    return res.status(500).json({ error: error.message || 'Failed to add member' });
+  }
+});
+
+// Remove member from group
+router.delete('/:id/members/:memberId', authenticateJWT, requireRole(['NGO_ADMIN', 'SECRETARY']), async (req: Request, res: Response) => {
+  const { id: groupId, memberId } = req.params;
+  try {
+    await prisma.groupMember.delete({
+      where: {
+        groupId_memberId: { groupId, memberId },
+      },
+    });
+    const authReq = req as AuthenticatedRequest;
+    await logSystemActivity(authReq.user!.id, 'GROUP_REMOVE_MEMBER', `Removed user ${memberId} from group ${groupId}`);
+    return res.json({ success: true, message: 'Member removed from group' });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to remove member' });
   }
 });
 
