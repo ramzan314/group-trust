@@ -99,26 +99,10 @@ export default function NgoDashboard() {
     e.preventDefault();
     setFormError('');
     try {
-      // Find secretary by email in groups or mock lookup (simulated: find in users)
-      // Since secretary is seeded, let's look up secretaryId. In real production, secretaries have accounts.
-      // For seed, रमेश कुमार is at secretary@grouptrust.com.
-      // We'll hardcode or fetch, let's register/retrieve.
-      // To be simple, we fetch group secretary Ramesh's ID from groups or default it.
       const ramesh = groups.find(g => g.secretary?.email === secretaryEmail)?.secretary;
-      
-      let secId = ramesh?.id;
-      if (!secId) {
-        // Fallback: create group with ramesh's id if we can find it, otherwise throw
-        secId = '919876543211'; // Ramesh Kumar's UUID fallback or search
-        const matchingGroup = groups.find(g => g.secretaryId);
-        secId = matchingGroup ? matchingGroup.secretaryId : '';
-      }
+      const secId = ramesh?.id || groups.find(g => g.secretaryId)?.secretaryId;
 
-      if (!secId) {
-        throw new Error('Secretary not found. Use a valid secretary email.');
-      }
-
-      await fetchAPI('/groups', {
+      const newGroup = await fetchAPI('/groups', {
         method: 'POST',
         body: JSON.stringify({
           name: groupName,
@@ -126,13 +110,21 @@ export default function NgoDashboard() {
           savingsAmount: Number(savingsAmount),
           savingsFrequency,
           interestRate: Number(interestRate),
+          secretaryEmail: secretaryEmail,
           secretaryId: secId,
         }),
       });
 
+      // Immediately prepend the new group so the table updates instantly
+      if (newGroup && newGroup.id) {
+        setGroups(prev => [newGroup, ...prev.filter(g => g.id !== newGroup.id)]);
+      }
+
       alert('Group created successfully!');
       setShowCreateModal(false);
       setGroupName('');
+      
+      // Refresh summary and any new counts
       loadData();
     } catch (err: any) {
       setFormError(err.message || 'Failed to create group');

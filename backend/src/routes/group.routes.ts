@@ -9,7 +9,8 @@ const router = Router();
 const CreateGroupSchema = z.object({
   name: z.string().min(2),
   type: z.enum(['ROSCA', 'JLG', 'SHG']),
-  secretaryId: z.string(),
+  secretaryId: z.string().optional(),
+  secretaryEmail: z.string().email().optional(),
   savingsAmount: z.number().positive(),
   savingsFrequency: z.enum(['WEEKLY', 'MONTHLY']),
   interestRate: z.number().nonnegative(),
@@ -22,20 +23,48 @@ router.post('/', authenticateJWT, requireRole(['NGO_ADMIN', 'SECRETARY']), async
   try {
     const validated = CreateGroupSchema.parse(req.body);
     
-    const secretary = await prisma.user.findUnique({ where: { id: validated.secretaryId } });
-    if (!secretary || secretary.role !== 'SECRETARY') {
-      return res.status(400).json({ error: 'Invalid secretary selected' });
+    // Resolve secretary either by ID or by email
+    let secretaryUser = null;
+    if (validated.secretaryId) {
+      secretaryUser = await prisma.user.findUnique({ where: { id: validated.secretaryId } });
+    }
+    if (!secretaryUser && validated.secretaryEmail) {
+      secretaryUser = await prisma.user.findUnique({ where: { email: validated.secretaryEmail } });
+    }
+    if (!secretaryUser && authReq.user!.role === 'SECRETARY') {
+      secretaryUser = await prisma.user.findUnique({ where: { id: authReq.user!.id } });
+    }
+    if (!secretaryUser) {
+      secretaryUser = await prisma.user.findFirst({ where: { role: 'SECRETARY' } });
+    }
+
+    if (!secretaryUser) {
+      return res.status(400).json({ error: 'Secretary not found. Please provide a valid secretary.' });
+    }
+
+    // Automatically link to the NGO administered by the logged-in NGO Admin
+    let assignedNgoId = validated.ngoId || null;
+    if (!assignedNgoId && authReq.user!.role === 'NGO_ADMIN') {
+      const ngo = await prisma.ngo.findFirst({ where: { adminId: authReq.user!.id } });
+      if (ngo) {
+        assignedNgoId = ngo.id;
+      }
     }
 
     const group = await prisma.group.create({
       data: {
         name: validated.name,
         type: validated.type,
-        ngoId: validated.ngoId || null,
-        secretaryId: validated.secretaryId,
+        ngoId: assignedNgoId,
+        secretaryId: secretaryUser.id,
         savingsAmount: validated.savingsAmount,
         savingsFrequency: validated.savingsFrequency,
         interestRate: validated.interestRate,
+      },
+      include: {
+        secretary: { select: { id: true, name: true, email: true } },
+        ngo: true,
+        _count: { select: { members: true } },
       },
     });
 
@@ -43,7 +72,7 @@ router.post('/', authenticateJWT, requireRole(['NGO_ADMIN', 'SECRETARY']), async
     await prisma.groupMember.create({
       data: {
         groupId: group.id,
-        memberId: validated.secretaryId,
+        memberId: secretaryUser.id,
         status: 'ACTIVE',
       },
     });
@@ -70,6 +99,7 @@ router.get('/', authenticateJWT, async (req: Request, res: Response) => {
         where: {
           OR: [
             { ngoId: { in: ngoIds } },
+            { ngoId: null },
             { secretaryId: userId }
           ],
         },
@@ -78,6 +108,7 @@ router.get('/', authenticateJWT, async (req: Request, res: Response) => {
           ngo: true,
           _count: { select: { members: true } },
         },
+        orderBy: { createdAt: 'desc' },
       });
     } else if (role === 'SECRETARY') {
       groups = await prisma.group.findMany({
