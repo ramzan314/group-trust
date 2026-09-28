@@ -23,7 +23,7 @@ export default function LoginPage() {
     try {
       const response = await fetchAPI('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
       if (response.token && response.user) {
         loginUser(response.token, response.user);
