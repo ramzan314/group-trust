@@ -48,7 +48,13 @@ export default function NgoDashboard() {
   const [savingsAmount, setSavingsAmount] = useState(200);
   const [savingsFrequency, setSavingsFrequency] = useState('WEEKLY');
   const [interestRate, setInterestRate] = useState(12.0);
-  const [secretaryEmail, setSecretaryEmail] = useState('secretary@grouptrust.com');
+  const [secretaries, setSecretaries] = useState<any[]>([]);
+  const [secretaryMode, setSecretaryMode] = useState<'EXISTING' | 'NEW'>('EXISTING');
+  const [selectedSecretaryId, setSelectedSecretaryId] = useState('');
+  const [newSecretaryName, setNewSecretaryName] = useState('');
+  const [newSecretaryEmail, setNewSecretaryEmail] = useState('');
+  const [newSecretaryPhone, setNewSecretaryPhone] = useState('');
+  const [newSecretaryPassword, setNewSecretaryPassword] = useState('password123');
   const [formError, setFormError] = useState('');
 
   const loadData = async () => {
@@ -59,6 +65,12 @@ export default function NgoDashboard() {
 
       const grps = await fetchAPI('/groups');
       setGroups(grps);
+
+      const secList = await fetchAPI('/groups/secretaries').catch(() => []);
+      setSecretaries(secList);
+      if (secList.length > 0 && !selectedSecretaryId) {
+        setSelectedSecretaryId(secList[0].id);
+      }
 
       // Fetch pending members from JLG group detail
       const pending: any[] = [];
@@ -99,20 +111,29 @@ export default function NgoDashboard() {
     e.preventDefault();
     setFormError('');
     try {
-      const ramesh = groups.find(g => g.secretary?.email === secretaryEmail)?.secretary;
-      const secId = ramesh?.id || groups.find(g => g.secretaryId)?.secretaryId;
+      const payload: any = {
+        name: groupName,
+        type: groupType,
+        savingsAmount: Number(savingsAmount),
+        savingsFrequency,
+        interestRate: Number(interestRate),
+      };
+
+      if (secretaryMode === 'EXISTING') {
+        payload.secretaryId = selectedSecretaryId || secretaries[0]?.id || groups.find(g => g.secretaryId)?.secretaryId;
+      } else {
+        if (!newSecretaryName.trim() || !newSecretaryEmail.trim()) {
+          throw new Error('Please provide secretary name and email.');
+        }
+        payload.secretaryName = newSecretaryName.trim();
+        payload.secretaryEmail = newSecretaryEmail.trim();
+        payload.secretaryPhone = newSecretaryPhone.trim();
+        payload.secretaryPassword = newSecretaryPassword || 'password123';
+      }
 
       const newGroup = await fetchAPI('/groups', {
         method: 'POST',
-        body: JSON.stringify({
-          name: groupName,
-          type: groupType,
-          savingsAmount: Number(savingsAmount),
-          savingsFrequency,
-          interestRate: Number(interestRate),
-          secretaryEmail: secretaryEmail,
-          secretaryId: secId,
-        }),
+        body: JSON.stringify(payload),
       });
 
       // Immediately prepend the new group so the table updates instantly
@@ -120,11 +141,15 @@ export default function NgoDashboard() {
         setGroups(prev => [newGroup, ...prev.filter(g => g.id !== newGroup.id)]);
       }
 
-      alert('Group created successfully!');
+      alert(`Group created successfully! ${secretaryMode === 'NEW' ? `\n\nSecretary account created:\nEmail: ${newSecretaryEmail}\nPassword: ${newSecretaryPassword || 'password123'}` : ''}`);
       setShowCreateModal(false);
       setGroupName('');
+      setNewSecretaryName('');
+      setNewSecretaryEmail('');
+      setNewSecretaryPhone('');
+      setNewSecretaryPassword('password123');
       
-      // Refresh summary and any new counts
+      // Refresh summary and groups list
       loadData();
     } catch (err: any) {
       setFormError(err.message || 'Failed to create group');
@@ -406,15 +431,99 @@ export default function NgoDashboard() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-500">Secretary Email</label>
-                <input
-                  type="email"
-                  required
-                  value={secretaryEmail}
-                  onChange={(e) => setSecretaryEmail(e.target.value)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-brand-500 dark:bg-slate-800 dark:border-slate-700"
-                />
+              {/* Secretary Appointment Section */}
+              <div className="flex flex-col gap-2.5 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 dark:bg-slate-800/50 dark:border-slate-700">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Group Secretary
+                  </label>
+                  <div className="flex rounded-lg bg-slate-200/80 p-0.5 dark:bg-slate-700 text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setSecretaryMode('EXISTING')}
+                      className={`px-2.5 py-1 rounded-md transition ${secretaryMode === 'EXISTING' ? 'bg-white text-slate-900 shadow dark:bg-slate-800 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
+                    >
+                      Existing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSecretaryMode('NEW')}
+                      className={`px-2.5 py-1 rounded-md transition ${secretaryMode === 'NEW' ? 'bg-white text-slate-900 shadow dark:bg-slate-800 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
+                    >
+                      + Create New
+                    </button>
+                  </div>
+                </div>
+
+                {secretaryMode === 'EXISTING' ? (
+                  <div className="flex flex-col gap-1 mt-1">
+                    <label className="text-[11px] font-semibold text-slate-500">Select Secretary</label>
+                    <select
+                      value={selectedSecretaryId}
+                      onChange={(e) => setSelectedSecretaryId(e.target.value)}
+                      className="px-3 py-2 rounded-xl border border-slate-200 focus:outline-none dark:bg-slate-800 dark:border-slate-700 text-sm"
+                    >
+                      {secretaries.map((sec) => (
+                        <option key={sec.id} value={sec.id}>
+                          {sec.name} ({sec.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2.5 mt-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] font-semibold text-slate-500">Secretary Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={newSecretaryName}
+                          onChange={(e) => setNewSecretaryName(e.target.value)}
+                          placeholder="e.g. Ramesh Kumar"
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 text-sm focus:outline-none dark:bg-slate-800 dark:border-slate-700"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] font-semibold text-slate-500">Phone</label>
+                        <input
+                          type="text"
+                          value={newSecretaryPhone}
+                          onChange={(e) => setNewSecretaryPhone(e.target.value)}
+                          placeholder="+91 9876543211"
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 text-sm focus:outline-none dark:bg-slate-800 dark:border-slate-700"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] font-semibold text-slate-500">Email Address</label>
+                        <input
+                          type="email"
+                          required
+                          value={newSecretaryEmail}
+                          onChange={(e) => setNewSecretaryEmail(e.target.value)}
+                          placeholder="secretary@example.com"
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 text-sm focus:outline-none dark:bg-slate-800 dark:border-slate-700"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] font-semibold text-slate-500">Set Login Password</label>
+                        <input
+                          type="text"
+                          required
+                          value={newSecretaryPassword}
+                          onChange={(e) => setNewSecretaryPassword(e.target.value)}
+                          placeholder="e.g. password123"
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 text-sm focus:outline-none dark:bg-slate-800 dark:border-slate-700 font-mono"
+                        />
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      The secretary will use this email and password to log in and manage the group.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-4 mt-4">

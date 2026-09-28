@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../prisma';
 import { z } from 'zod';
+import * as bcrypt from 'bcryptjs';
 import { authenticateJWT, AuthenticatedRequest, requireRole } from '../middleware/auth';
 import { logSystemActivity } from '../utils/audit';
 
@@ -11,6 +12,9 @@ const CreateGroupSchema = z.object({
   type: z.enum(['ROSCA', 'JLG', 'SHG']),
   secretaryId: z.string().optional(),
   secretaryEmail: z.string().email().optional(),
+  secretaryName: z.string().optional(),
+  secretaryPhone: z.string().optional(),
+  secretaryPassword: z.string().optional(),
   savingsAmount: z.number().positive(),
   savingsFrequency: z.enum(['WEEKLY', 'MONTHLY']),
   interestRate: z.number().nonnegative(),
@@ -23,14 +27,36 @@ router.post('/', authenticateJWT, requireRole(['NGO_ADMIN', 'SECRETARY']), async
   try {
     const validated = CreateGroupSchema.parse(req.body);
     
-    // Resolve secretary either by ID or by email
+    // Resolve or create secretary
     let secretaryUser = null;
+
+    // 1. If explicitly choosing an existing secretary by ID
     if (validated.secretaryId) {
       secretaryUser = await prisma.user.findUnique({ where: { id: validated.secretaryId } });
     }
+
+    // 2. If creating a new secretary or looking up by email
     if (!secretaryUser && validated.secretaryEmail) {
       secretaryUser = await prisma.user.findUnique({ where: { email: validated.secretaryEmail } });
+
+      // If user does not exist and name/password are provided, create new secretary account
+      if (!secretaryUser && (validated.secretaryName || validated.secretaryPassword)) {
+        const passwordHash = await bcrypt.hash(validated.secretaryPassword || 'password123', 10);
+        secretaryUser = await prisma.user.create({
+          data: {
+            name: validated.secretaryName || 'Group Secretary',
+            email: validated.secretaryEmail,
+            phone: validated.secretaryPhone || `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`,
+            passwordHash,
+            role: 'SECRETARY',
+            isVerified: true,
+            kycStatus: 'APPROVED',
+          },
+        });
+      }
     }
+
+    // 3. Fallbacks
     if (!secretaryUser && authReq.user!.role === 'SECRETARY') {
       secretaryUser = await prisma.user.findUnique({ where: { id: authReq.user!.id } });
     }
@@ -39,7 +65,7 @@ router.post('/', authenticateJWT, requireRole(['NGO_ADMIN', 'SECRETARY']), async
     }
 
     if (!secretaryUser) {
-      return res.status(400).json({ error: 'Secretary not found. Please provide a valid secretary.' });
+      return res.status(400).json({ error: 'Secretary not found. Please provide a valid secretary or specify details to create one.' });
     }
 
     // Automatically link to the NGO administered by the logged-in NGO Admin
@@ -138,6 +164,20 @@ router.get('/', authenticateJWT, async (req: Request, res: Response) => {
     return res.json(groups);
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to fetch groups' });
+  }
+});
+
+// List available secretaries for appointment
+router.get('/secretaries', authenticateJWT, async (req: Request, res: Response) => {
+  try {
+    const secretaries = await prisma.user.findMany({
+      where: { role: 'SECRETARY' },
+      select: { id: true, name: true, email: true, phone: true },
+      orderBy: { name: 'asc' },
+    });
+    return res.json(secretaries);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to fetch secretaries' });
   }
 });
 
